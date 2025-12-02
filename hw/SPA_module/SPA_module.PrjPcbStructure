@@ -1,0 +1,6 @@
+Record=TopLevelDocument|FileName=can.SchDoc|SheetNumber=3
+Record=NoMainPathDocument|SourceDocument=can.SchDoc|FileName=connector.SchDoc|SheetNumber=5
+Record=NoMainPathDocument|SourceDocument=can.SchDoc|FileName=front_ultrasonic_radar.SchDoc|SheetNumber=4
+Record=NoMainPathDocument|SourceDocument=can.SchDoc|FileName=rear_ultrasonic_radar.SchDoc|SheetNumber=6
+Record=NoMainPathDocument|SourceDocument=can.SchDoc|FileName=STM32F103.SchDoc|SheetNumber=1
+Record=NoMainPathDocument|SourceDocument=can.SchDoc|FileName=video_switch.SchDoc|SheetNumber=2

@@ -84,8 +84,8 @@ all: main-build
 main-build: SPA_Module.elf secondary-outputs
 
 # Tool invocations
-SPA_Module.elf SPA_Module.map: $(OBJS) $(USER_OBJS) C:\Users\a_shpergl\STM32CubeIDE\workspace_1.17.0\Parking_Module\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-g++ -o "SPA_Module.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"C:\Users\a_shpergl\STM32CubeIDE\workspace_1.17.0\Parking_Module\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="SPA_Module.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -lstdc++ -lsupc++ -Wl,--end-group
+SPA_Module.elf SPA_Module.map: $(OBJS) $(USER_OBJS) D:\MyProjects\Automotive\Calibra\Modules\SPA_module\sw\STM32F103C8TX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-g++ -o "SPA_Module.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m3 -T"D:\MyProjects\Automotive\Calibra\Modules\SPA_module\sw\STM32F103C8TX_FLASH.ld" --specs=nosys.specs -Wl,-Map="SPA_Module.map" -Wl,--gc-sections -static --specs=nano.specs -mfloat-abi=soft -mthumb -Wl,--start-group -lc -lm -lstdc++ -lsupc++ -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

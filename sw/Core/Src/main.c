@@ -52,15 +52,15 @@
 #define FRONT_SPEED_LIMIT 		5
 #define FRONT_DISTANCE_LIMIT	50
 
-#define DISTANCE_LIMIT_1 20		// cm
+#define DISTANCE_LIMIT_1 30		// cm
 #define DISTANCE_LIMIT_2 60		// cm
 #define DISTANCE_LIMIT_3 100	// cm
 #define DISTANCE_LIMIT_4 200	// cm
 
 #define DISTANCE_LIMIT_1_TIMEOUT 100	// mS
 #define DISTANCE_LIMIT_2_TIMEOUT 200	// mS
-#define DISTANCE_LIMIT_3_TIMEOUT 500	// mS
-#define DISTANCE_LIMIT_4_TIMEOUT 1000	// mS
+#define DISTANCE_LIMIT_3_TIMEOUT 400	// mS
+#define DISTANCE_LIMIT_4_TIMEOUT 800	// mS
 
 #define RIGHT_CAMERA_INDEX	0
 #define LEFT_CAMERA_INDEX	1
@@ -96,6 +96,7 @@
 /* Private variables ---------------------------------------------------------*/
 CAN_HandleTypeDef hcan;
 
+TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 TIM_HandleTypeDef htim4;
@@ -120,6 +121,9 @@ int8_t				right_turn = 0;
 int8_t				send_can_status = 0;
 int8_t				parking_camera_state = 0;
 int8_t				front_parking_radar = 0;
+
+volatile uint8_t sleep_mode_activated = 0;
+volatile uint8_t enter_sleep_flag = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -129,6 +133,7 @@ static void MX_CAN_Init(void);
 static void MX_TIM2_Init(void);
 static void MX_TIM4_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_TIM1_Init(void);
 /* USER CODE BEGIN PFP */
 /* USER CODE END PFP */
 
@@ -221,19 +226,8 @@ void can_send_sensors(){
 	}
 }
 
-void send_front_beep_distance(){
-	static uint8_t TxData[8];
-		TxHeader.StdId = CAN_SID_BEEP_FRAME_ID;
-		TxData[1] |= 1 << 2;
-		//	TxData[1] |= 1 << x - 2 beep; 3 turn click; 4 turn click2; 5 seat belts; 6 tick tick;
-		//	TxData[2] |= 1 << x - 6 quick beep; 7 long beep
-		if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK)
-		{
-			Error_Handler();
-		}
-}
 
-void send_front_long_beep_distance(){
+void send_long_beep_distance(){
 	static uint8_t TxData[8];
 		TxHeader.StdId = CAN_SID_BEEP_FRAME_ID;
 		TxData[2] |= 1 << 7;
@@ -243,30 +237,50 @@ void send_front_long_beep_distance(){
 		}
 }
 
-void send_rear_beep_distance(){
+void send_beep_distance(){
 	static uint8_t TxData[8];
 		TxHeader.StdId = CAN_SID_BEEP_FRAME_ID;
-		TxData[1] |= 1 << 2;
+		TxData[1] |= 1 << 4;
 		if (HAL_CAN_AddTxMessage(&hcan, &TxHeader, TxData, &TxMailbox) != HAL_OK)
 		{
 			Error_Handler();
 		}
 }
 
-void SendFrontParkingSound()
+uint16_t get_min_distance()
+{
+	uint16_t min_distance = 255;
+	for (int i=0; i<3; i++)
+	{
+		if (front_sensors[i] < min_distance) min_distance = front_sensors[i];
+		if (rear_sensors[i] < min_distance) min_distance = rear_sensors[i];
+	}
+	return min_distance;
+}
+
+uint16_t get_front_min_distance()
+{
+	uint16_t min_distance = 255;
+	for (int i=0; i<3; i++){
+			if (front_sensors[i] < min_distance) min_distance = front_sensors[i];
+		}
+	return min_distance;
+}
+
+void SendParkingSound()
 {
 	static uint32_t last_time = 0;
 
 	if (notification == 0) return;
 
-	switch(front_min_distance * RADAR_DISTANCE_MULTIPLIER)
+	switch(get_min_distance() * RADAR_DISTANCE_MULTIPLIER)
 	{
 	case 0 ... DISTANCE_LIMIT_1:
 	{
 		if ((HAL_GetTick() - last_time >= DISTANCE_LIMIT_1_TIMEOUT) || last_time == 0)
 		{
 			last_time = HAL_GetTick();
-			send_front_beep_distance();
+			send_beep_distance();
 		}
 	}
 	break;
@@ -275,7 +289,7 @@ void SendFrontParkingSound()
 		if ((HAL_GetTick() - last_time >= DISTANCE_LIMIT_2_TIMEOUT) || last_time == 0)
 		{
 			last_time = HAL_GetTick();
-			send_front_beep_distance();
+			send_beep_distance();
 		}
 	}
 	break;
@@ -284,7 +298,7 @@ void SendFrontParkingSound()
 		if ((HAL_GetTick() - last_time >= DISTANCE_LIMIT_3_TIMEOUT) || last_time == 0)
 		{
 			last_time = HAL_GetTick();
-			send_front_beep_distance();
+			send_beep_distance();
 		}
 	}
 	break;
@@ -293,60 +307,12 @@ void SendFrontParkingSound()
 		if ((HAL_GetTick() - last_time >= DISTANCE_LIMIT_4_TIMEOUT) || last_time == 0)
 		{
 			last_time = HAL_GetTick();
-			send_front_beep_distance();
+			send_beep_distance();
 		}
 	}
 	break;
 	}
 }
-
-void SendRearParkingSound()
-{
-	static uint32_t last_time = 0;
-
-	if (notification == 0) return;
-
-	switch(rear_min_distance * RADAR_DISTANCE_MULTIPLIER)
-	{
-	case 0 ... DISTANCE_LIMIT_1:
-	{
-		if ((HAL_GetTick() - last_time >= DISTANCE_LIMIT_1_TIMEOUT) || last_time == 0)
-		{
-			last_time = HAL_GetTick();
-			send_rear_beep_distance();
-		}
-	}
-	break;
-	case (DISTANCE_LIMIT_1 + 1) ... DISTANCE_LIMIT_2:
-	{
-		if ((HAL_GetTick() - last_time >= DISTANCE_LIMIT_2_TIMEOUT) || last_time == 0)
-		{
-			last_time = HAL_GetTick();
-			send_rear_beep_distance();
-		}
-	}
-	break;
-	case (DISTANCE_LIMIT_2 + 1) ... DISTANCE_LIMIT_3:
-	{
-		if ((HAL_GetTick() - last_time >= DISTANCE_LIMIT_3_TIMEOUT) || last_time == 0)
-		{
-			last_time = HAL_GetTick();
-			send_rear_beep_distance();
-		}
-	}
-	break;
-	case (DISTANCE_LIMIT_3 + 1) ... DISTANCE_LIMIT_4:
-	{
-		if ((HAL_GetTick() - last_time >= DISTANCE_LIMIT_4_TIMEOUT) || last_time == 0)
-		{
-			last_time = HAL_GetTick();
-			send_rear_beep_distance();
-		}
-	}
-	break;
-	}
-}
-
 
 void HandleCameraState(int16_t state)
 {
@@ -371,8 +337,10 @@ void StopRadar(){
 	start_radar = 0;
 	notification = 0;
 	send_can_status = 0;
-	memset(front_sensors, 255, 4*sizeof(front_sensors[0]));
-	memset(rear_sensors, 255, 4*sizeof(rear_sensors[0]));
+	for (int i=0; i<3; i++){
+		front_sensors[i] = 255;
+		rear_sensors[i] = 255;
+	}
 	front_min_distance = 255;
 	rear_min_distance = 255;
 	HAL_GPIO_WritePin(GPIOA, PARKING_RADAR_PIN, GPIO_PIN_SET);
@@ -487,7 +455,7 @@ void HandleFrontSpeed(uint32_t speed)
 
 		front_parking_radar = 1;
 		if (enable_notification){
-			if (front_min_distance * RADAR_DISTANCE_MULTIPLIER <= FRONT_DISTANCE_LIMIT){
+			if (get_front_min_distance() * RADAR_DISTANCE_MULTIPLIER <= FRONT_DISTANCE_LIMIT){
 				notification = 1;
 			} else {
 				notification = 0;
@@ -543,38 +511,129 @@ void HandleParkingButton(void) {
 		last_btn_pressed = 0;
 	}
 }
+uint8_t current_radar_idx = -1;
+uint8_t front_pulse_captured = 0, rear_pulse_captured = 0;
+
+uint8_t front_start_captured = 0;
+void HandleFrontPulses(TIM_HandleTypeDef *htim){
+	static uint32_t IC_val1_front = 0, IC_val2_front= 0;
+	uint32_t IC_diff_front = 0;
+
+	if (front_pulse_captured) return;
+
+	if (!front_start_captured){
+		IC_val1_front = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1);
+		front_start_captured = 1;
+	}
+	else {
+		IC_val2_front = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1);
+		IC_diff_front = IC_val2_front - IC_val1_front;
+
+		front_sensors[current_radar_idx] = (IC_diff_front * 173)/ 100000;
+		front_start_captured = 0;
+		front_pulse_captured = 1;
+	}
+
+}
+
+uint8_t rear_start_captured = 0;
+void HandleRearPulses(TIM_HandleTypeDef *htim){
+	static uint32_t IC_val1_rear = 0, IC_val2_rear= 0;
+	uint32_t IC_diff_rear = 0;
+
+	if (rear_pulse_captured) return;
+
+	if (!rear_start_captured){
+		IC_val1_rear = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);
+		rear_start_captured = 1;
+	}
+	else {
+		IC_val2_rear = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);
+		IC_diff_rear = IC_val2_rear - IC_val1_rear;
+
+		rear_sensors[current_radar_idx] = (IC_diff_rear * 173)/ 100000;
+		rear_start_captured = 0;
+		rear_pulse_captured = 1;
+	}
+}
+
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
 	if (!CHECK_RADAR_ON) return;
 
-
-	if(htim -> Instance == TIM3 && htim -> Channel == HAL_TIM_ACTIVE_CHANNEL_2)
+	if(htim -> Instance == TIM2 && htim -> Channel == HAL_TIM_ACTIVE_CHANNEL_1)
 	{
-		HandleRearRadarPulses(htim);
+		HandleFrontPulses(htim);
 	}
-	if(htim -> Instance == TIM2 && htim -> Channel == HAL_TIM_ACTIVE_CHANNEL_2)
+	if(htim -> Instance == TIM2 && htim -> Channel == HAL_TIM_ACTIVE_CHANNEL_3)
 	{
-		HandleFrontRadarPulses(htim);
+		HandleRearPulses(htim);
 	}
 }
+
+uint32_t front_max_distance_counter[4], rear_max_distance_counter[4];
 
 void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 {
 	static	uint32_t	 start_time = 0;
+	if (!CHECK_RADAR_ON) return;
 
-	if (htim->Instance == TIM4 && CHECK_RADAR_ON){
+	if (htim->Instance == TIM3){
 		if(htim -> Channel == HAL_TIM_ACTIVE_CHANNEL_1)
 		{
-			SendRearParkingSound(); // 90 mS
+			current_radar_idx ++;
+			if (current_radar_idx > 3) current_radar_idx = 0;
+			HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15, CHECK_BIT(current_radar_idx, 0)); //A
+			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, CHECK_BIT(current_radar_idx, 1));	//B
+
+			if (!front_pulse_captured){
+				if (front_sensors[current_radar_idx] != 255) {
+					front_max_distance_counter[current_radar_idx] ++;
+				}
+				if (front_max_distance_counter[current_radar_idx] == 10) {
+					front_sensors[current_radar_idx] = 255;
+					front_max_distance_counter[current_radar_idx] = 0;
+				}
+			}
+			front_start_captured = 0;
+			front_pulse_captured = 0;
+
+
+			TIM1->CCR3 = 450-1;
+			TIM1->CCR1 = 65535;
+			htim1.Instance->CR1 |= TIM_CR1_CEN; // Enable Counter
+
 		}
+
 		if(htim -> Channel == HAL_TIM_ACTIVE_CHANNEL_2)
 		{
-			SendFrontParkingSound(); // 50 mS
+			if (!rear_pulse_captured){
+				if (rear_sensors[current_radar_idx] != 255){
+					rear_max_distance_counter[current_radar_idx] ++;
+				}
+				if (rear_max_distance_counter[current_radar_idx] == 10) {
+					rear_sensors[current_radar_idx] = 255;
+					rear_max_distance_counter[current_radar_idx] = 0;
+				}
+			}
+			rear_start_captured = 0;
+			rear_pulse_captured = 0;
+			TIM1->CCR3 = 65535;
+			TIM1->CCR1 = 450-1;
+			htim1.Instance->CR1 |= TIM_CR1_CEN; // Enable Counter
+		}
+	}
+
+	if (htim->Instance == TIM4){
+		if(htim -> Channel == HAL_TIM_ACTIVE_CHANNEL_2)
+		{
+//			SendParkingSound(); // 50 mS
 		}
 		if(htim -> Channel == HAL_TIM_ACTIVE_CHANNEL_3)
 		{
 
+			SendParkingSound();
 			if (send_can_status) can_send_sensors(); // 100 mS
 
 			/* Wait timeout to proper enter parking mode on Head Unit */
@@ -588,6 +647,34 @@ void HAL_TIM_OC_DelayElapsedCallback(TIM_HandleTypeDef *htim)
 			}
 		}
 	}
+}
+
+void EnterSleepMode(){
+	enter_sleep_flag = 0;
+	sleep_mode_activated = 1;
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET); // CAN off
+	HAL_SuspendTick();
+	HAL_PWR_EnterSLEEPMode(PWR_MAINREGULATOR_ON, PWR_SLEEPENTRY_WFI);
+
+}
+
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	// if rising edge
+	if(SleepMode_Activated == 1)
+	{
+		// CPU Has Exited From Sleep Mode, Resume The SysTick!
+		HAL_ResumeTick();
+		SleepMode_Activated = 0;
+	}
+
+	// iuf falling edge
+	else
+	{
+		// Re-Enter Sleep Mode!
+		EnterSleepFlag = 1;
+	}
+
 }
 
 void HAL_CAN_RxFifo1MsgPendingCallback(CAN_HandleTypeDef *hcan)
@@ -665,13 +752,16 @@ int main(void)
   MX_TIM2_Init();
   MX_TIM4_Init();
   MX_TIM3_Init();
+  MX_TIM1_Init();
   /* USER CODE BEGIN 2 */
+  EnterSleepMode();
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  if(enter_sleep_flag) EnterSleepMode();
 	  HandleRadarState();
 	  HandleParkingButton();
 	  HandleLeftTurnCountdown(0);
@@ -805,6 +895,90 @@ static void MX_CAN_Init(void)
 }
 
 /**
+  * @brief TIM1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM1_Init(void)
+{
+
+  /* USER CODE BEGIN TIM1_Init 0 */
+
+  /* USER CODE END TIM1_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+  TIM_BreakDeadTimeConfigTypeDef sBreakDeadTimeConfig = {0};
+
+  /* USER CODE BEGIN TIM1_Init 1 */
+
+  /* USER CODE END TIM1_Init 1 */
+  htim1.Instance = TIM1;
+  htim1.Init.Prescaler = 2-1;
+  htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim1.Init.Period = 900-1;
+  htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim1.Init.RepetitionCounter = 16-1;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim1, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_OnePulse_Init(&htim1, TIM_OPMODE_SINGLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 450-1;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_LOW;
+  sConfigOC.OCNPolarity = TIM_OCNPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  sConfigOC.OCIdleState = TIM_OCIDLESTATE_SET;
+  sConfigOC.OCNIdleState = TIM_OCNIDLESTATE_RESET;
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sBreakDeadTimeConfig.OffStateRunMode = TIM_OSSR_DISABLE;
+  sBreakDeadTimeConfig.OffStateIDLEMode = TIM_OSSI_DISABLE;
+  sBreakDeadTimeConfig.LockLevel = TIM_LOCKLEVEL_OFF;
+  sBreakDeadTimeConfig.DeadTime = 0;
+  sBreakDeadTimeConfig.BreakState = TIM_BREAK_DISABLE;
+  sBreakDeadTimeConfig.BreakPolarity = TIM_BREAKPOLARITY_HIGH;
+  sBreakDeadTimeConfig.AutomaticOutput = TIM_AUTOMATICOUTPUT_DISABLE;
+  if (HAL_TIMEx_ConfigBreakDeadTime(&htim1, &sBreakDeadTimeConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM1_Init 2 */
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
+  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_3);
+  /* USER CODE END TIM1_Init 2 */
+  HAL_TIM_MspPostInit(&htim1);
+
+}
+
+/**
   * @brief TIM2 Initialization Function
   * @param None
   * @retval None
@@ -817,9 +991,8 @@ static void MX_TIM2_Init(void)
   /* USER CODE END TIM2_Init 0 */
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
-  TIM_IC_InitTypeDef sConfigIC = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_IC_InitTypeDef sConfigIC = {0};
 
   /* USER CODE BEGIN TIM2_Init 1 */
 
@@ -827,7 +1000,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 72-1;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 65535;
+  htim2.Init.Period = 60000-1;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -843,16 +1016,13 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
-  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
-  sSlaveConfig.InputTrigger = TIM_TS_TI1FP1;
-  sSlaveConfig.TriggerPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-  sSlaveConfig.TriggerPrescaler = TIM_ICPSC_DIV1;
-  sSlaveConfig.TriggerFilter = 0;
-  if (HAL_TIM_SlaveConfigSynchro(&htim2, &sSlaveConfig) != HAL_OK)
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_ENABLE;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
   {
     Error_Handler();
   }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
   sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
   sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
   sConfigIC.ICFilter = 0;
@@ -860,21 +1030,14 @@ static void MX_TIM2_Init(void)
   {
     Error_Handler();
   }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
-  sConfigIC.ICSelection = TIM_ICSELECTION_INDIRECTTI;
-  if (HAL_TIM_IC_ConfigChannel(&htim2, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
+  if (HAL_TIM_IC_ConfigChannel(&htim2, &sConfigIC, TIM_CHANNEL_3) != HAL_OK)
   {
     Error_Handler();
   }
   /* USER CODE BEGIN TIM2_Init 2 */
-//  HAL_TIM_IC_Start(&htim2, TIM_CHANNEL_1);
-  HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_2);
+  HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_1);
+  HAL_TIM_IC_Start_IT(&htim2, TIM_CHANNEL_3);
   /* USER CODE END TIM2_Init 2 */
 
 }
@@ -892,9 +1055,8 @@ static void MX_TIM3_Init(void)
   /* USER CODE END TIM3_Init 0 */
 
   TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_SlaveConfigTypeDef sSlaveConfig = {0};
-  TIM_IC_InitTypeDef sConfigIC = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
 
   /* USER CODE BEGIN TIM3_Init 1 */
 
@@ -902,7 +1064,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 72-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 65535;
+  htim3.Init.Period = 20000-1;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -914,30 +1076,7 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
-  if (HAL_TIM_IC_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sSlaveConfig.SlaveMode = TIM_SLAVEMODE_RESET;
-  sSlaveConfig.InputTrigger = TIM_TS_TI1FP1;
-  sSlaveConfig.TriggerPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-  sSlaveConfig.TriggerPrescaler = TIM_ICPSC_DIV1;
-  sSlaveConfig.TriggerFilter = 0;
-  if (HAL_TIM_SlaveConfigSynchro(&htim3, &sSlaveConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
-  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
-  sConfigIC.ICFilter = 0;
-  if (HAL_TIM_IC_ConfigChannel(&htim3, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_FALLING;
-  sConfigIC.ICSelection = TIM_ICSELECTION_INDIRECTTI;
-  if (HAL_TIM_IC_ConfigChannel(&htim3, &sConfigIC, TIM_CHANNEL_2) != HAL_OK)
+  if (HAL_TIM_OC_Init(&htim3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -947,7 +1086,21 @@ static void MX_TIM3_Init(void)
   {
     Error_Handler();
   }
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 2-1;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.Pulse = 10000-1;
+  if (HAL_TIM_OC_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
   /* USER CODE BEGIN TIM3_Init 2 */
+  HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_1);
   HAL_TIM_IC_Start_IT(&htim3, TIM_CHANNEL_2);
   /* USER CODE END TIM3_Init 2 */
 
@@ -1045,7 +1198,13 @@ static void MX_GPIO_Init(void)
                           |Rear_Camera_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOA, CAN_On_Pin|B_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(Video_Output_GPIO_Port, Video_Output_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(A_GPIO_Port, A_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : Parking_Button_Pin */
   GPIO_InitStruct.Pin = Parking_Button_Pin;
@@ -1062,12 +1221,43 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : CAN_On_Pin */
+  GPIO_InitStruct.Pin = CAN_On_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(CAN_On_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pin : Video_Output_Pin */
   GPIO_InitStruct.Pin = Video_Output_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(Video_Output_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : Power_On_Pin */
+  GPIO_InitStruct.Pin = Power_On_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING_FALLING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(Power_On_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : A_Pin */
+  GPIO_InitStruct.Pin = A_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(A_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : B_Pin */
+  GPIO_InitStruct.Pin = B_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(B_GPIO_Port, &GPIO_InitStruct);
+
+  /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI1_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI1_IRQn);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */

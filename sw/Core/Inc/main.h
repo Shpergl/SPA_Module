@@ -49,6 +49,8 @@ extern "C" {
 
 /* USER CODE END EM */
 
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
 
@@ -67,12 +69,27 @@ void Error_Handler(void);
 #define Left_Camera_GPIO_Port GPIOA
 #define Front_Camera_Pin GPIO_PIN_5
 #define Front_Camera_GPIO_Port GPIOA
+#define CAN_On_Pin GPIO_PIN_6
+#define CAN_On_GPIO_Port GPIOA
 #define Rear_Camera_Pin GPIO_PIN_7
 #define Rear_Camera_GPIO_Port GPIOA
 #define Video_Output_Pin GPIO_PIN_0
 #define Video_Output_GPIO_Port GPIOB
-#define TIM2_Pin GPIO_PIN_15
-#define TIM2_GPIO_Port GPIOA
+#define Power_On_Pin GPIO_PIN_1
+#define Power_On_GPIO_Port GPIOB
+#define Power_On_EXTI_IRQn EXTI1_IRQn
+#define PWM_Input_rear_Pin GPIO_PIN_10
+#define PWM_Input_rear_GPIO_Port GPIOB
+#define A_Pin GPIO_PIN_15
+#define A_GPIO_Port GPIOB
+#define PWM1_Pin GPIO_PIN_8
+#define PWM1_GPIO_Port GPIOA
+#define B_Pin GPIO_PIN_9
+#define B_GPIO_Port GPIOA
+#define PWM2_Pin GPIO_PIN_10
+#define PWM2_GPIO_Port GPIOA
+#define PWM_Input_front_Pin GPIO_PIN_15
+#define PWM_Input_front_GPIO_Port GPIOA
 
 /* USER CODE BEGIN Private defines */
 
